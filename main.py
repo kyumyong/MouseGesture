@@ -1,0 +1,195 @@
+# main.py
+
+import pyautogui
+import pygetwindow as gw
+from pynput import mouse
+import tkinter as tk
+from threading import Thread
+
+# 제스처 데이터를 저장하기 위한 전역 변수
+is_right_button_pressed = False
+gesture_points = []
+visualizer = None
+
+
+# --- 제스처 시각화 ---
+
+class GestureVisualizer:
+    def __init__(self):
+        self.root = tk.Tk()
+        self.root.withdraw()  # 초기 창 숨기기
+        self.root.overrideredirect(True)  # 창 테두리 및 제목 표시줄 제거
+        self.root.attributes('-alpha', 0.5)  # 창 투명도 설정
+        self.root.attributes('-topmost', True)  # 항상 위에 표시
+        self.root.geometry(f"{self.root.winfo_screenwidth()}x{self.root.winfo_screenheight()}+0+0")
+
+        self.canvas = tk.Canvas(self.root, bg='black', highlightthickness=0)
+        self.canvas.pack(fill="both", expand=True)
+        self.root.wm_attributes('-transparentcolor', 'black')
+
+    def draw_gesture(self, points):
+        """캔버스에 제스처 경로를 그립니다."""
+        self.canvas.delete("all")  # 이전 그림 지우기
+        if len(points) > 1:
+            self.canvas.create_line(points, fill='green', width=3, capstyle=tk.ROUND, smooth=True)
+
+    def show(self):
+        """창을 화면에 표시합니다."""
+        self.root.deiconify()
+
+    def hide_and_destroy(self):
+        """창을 숨기고 파괴합니다."""
+        self.root.withdraw()
+        self.root.destroy()
+
+    def run(self):
+        """Tkinter 메인 루프를 실행합니다."""
+        self.show()
+        self.root.mainloop()
+
+
+# --- 기능 함수들 ---
+
+def minimize_window():
+    """현재 활성화된 창을 최소화합니다."""
+    try:
+        active_window = gw.getActiveWindow()
+        if active_window:
+            active_window.minimize()
+            print("기능: 창 최소화")
+    except Exception as e:
+        print(f"창 최소화 오류: {e}")
+
+def toggle_maximize_window():
+    """활성 창의 최대화/이전 크기 상태를 전환합니다."""
+    try:
+        active_window = gw.getActiveWindow()
+        if active_window:
+            if active_window.isMaximized:
+                active_window.restore()
+                print("기능: 창 이전 크기로")
+            else:
+                active_window.maximize()
+                print("기능: 창 최대화")
+    except Exception as e:
+        print(f"최대화 전환 오류: {e}")
+
+def next_page():
+    """다음 페이지로 이동합니다 (Alt+Right Arrow 키 입력)."""
+    pyautogui.hotkey('alt', 'right')
+    print("기능: 다음 페이지")
+
+def prev_page():
+    """이전 페이지로 이동합니다 (Alt+Left Arrow 키 입력)."""
+    pyautogui.hotkey('alt', 'left')
+    print("기능: 이전 페이지")
+
+def copy_action():
+    """선택한 것을 복사합니다 (Ctrl+C 키 입력)."""
+    pyautogui.hotkey('ctrl', 'c')
+    print("기능: 복사")
+
+def paste_action():
+    """클립보드 내용을 붙여넣습니다 (Ctrl+V 키 입력)."""
+    pyautogui.hotkey('ctrl', 'v')
+    print("기능: 붙여넣기")
+
+def close_window():
+    """활성 창을 닫습니다 (Alt+F4 키 입력)."""
+    pyautogui.hotkey('alt', 'f4')
+    print("기능: 창 닫기")
+
+# --- 제스처 인식 ---
+
+def analyze_gesture():
+    """기록된 제스처 포인트를 분석하고 해당 기능을 실행합니다."""
+    if len(gesture_points) < 5:  # 작은 움직임은 무시
+        return
+
+    start_x, start_y = gesture_points[0]
+    end_x, end_y = gesture_points[-1]
+
+    dx = end_x - start_x
+    dy = end_y - start_y
+    
+    threshold = 100  # 제스처로 인식할 최소 이동 거리
+
+    print(f"제스처 분석: dx={dx}, dy={dy}")
+
+    # 대각선 제스처를 먼저 확인
+    # 오른쪽 위 -> 왼쪽 아래 (↘)
+    if dx < -threshold and dy > threshold:
+        minimize_window()
+    # 왼쪽 아래 -> 오른쪽 위 (↗)
+    elif dx > threshold and dy < -threshold:
+        toggle_maximize_window()
+    # 그 다음 수평/수직 제스처 확인
+    # 수평 움직임 (왼쪽 -> 오른쪽)
+    elif dx > threshold and abs(dy) < threshold:
+        next_page()
+    # 수평 움직임 (오른쪽 -> 왼쪽)
+    elif dx < -threshold and abs(dy) < threshold:
+        prev_page()
+    # 수직 움직임 (아래 -> 위)
+    elif dy < -threshold and abs(dx) < threshold:
+        copy_action()
+    # 수직 움직임 (위 -> 아래)
+    elif dy > threshold and abs(dx) < threshold:
+        paste_action()
+    else:
+        print(f"제스처가 인식되지 않았습니다. (dx: {dx}, dy: {dy})")
+
+
+# --- 마우스 리스너 콜백 ---
+
+def on_move(x, y):
+    """마우스가 움직일 때 호출됩니다."""
+    if is_right_button_pressed:
+        gesture_points.append((x, y))
+        if visualizer:
+            visualizer.draw_gesture(gesture_points)
+
+def on_click(x, y, button, pressed):
+    """마우스 버튼이 클릭될 때 호출됩니다."""
+    global is_right_button_pressed, gesture_points, visualizer
+
+    if button == mouse.Button.right:
+        if pressed:
+            is_right_button_pressed = True
+            gesture_points = [(x, y)]
+            print("마우스 오른쪽 버튼 누름. 제스처 기록 시작...")
+
+            # 메인 스레드에서 visualizer를 생성
+            visualizer = GestureVisualizer()
+            
+            # 별도의 스레드에서 Tkinter 메인 루프를 실행
+            visualizer_thread = Thread(target=visualizer.run)
+            visualizer_thread.start()
+
+        else:
+            is_right_button_pressed = False
+            print("마우스 오른쪽 버튼 뗌. 제스처 분석...")
+            
+            if visualizer:
+                # Tkinter의 hide_and_destroy는 스레드 안전하지 않을 수 있으므로
+                # root.after를 사용하여 메인 루프 스레드에서 실행하도록 예약합니다.
+                visualizer.root.after(0, visualizer.hide_and_destroy)
+                visualizer = None
+
+            analyze_gesture()
+            gesture_points = []
+
+def on_scroll(x, y, dx, dy):
+    """마우스 휠을 스크롤할 때 호출됩니다."""
+
+    pass  # 이 프로젝트에서는 사용하지 않음
+
+# --- 메인 실행 ---
+
+if __name__ == "__main__":
+    print("마우스 제스처 프로그램이 실행 중입니다...")
+    print("마우스 오른쪽 버튼을 누른 상태로 제스처를 그려보세요.")
+
+    # 리스너 생성 및 시작
+    with mouse.Listener(on_move=on_move, on_click=on_click, on_scroll=on_scroll) as listener:
+        listener.join()
