@@ -45,8 +45,8 @@ user32.PeekMessageW.argtypes = (ctypes.POINTER(wintypes.MSG), wintypes.HWND, cty
 user32.UnhookWindowsHookEx.argtypes = (HHOOK,)
 
 # --- 3. 전역 변수 ---
-HORIZONTAL_THRESHOLD = 15
-VERTICAL_THRESHOLD = 15
+HORIZONTAL_THRESHOLD = 20
+VERTICAL_THRESHOLD = 20
 
 hook_id = None
 gesture_start_pos = None

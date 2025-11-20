@@ -1,5 +1,3 @@
-# main.py
-
 import pyautogui
 import pygetwindow as gw
 from pynput import mouse
