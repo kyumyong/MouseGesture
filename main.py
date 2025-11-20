@@ -8,7 +8,6 @@ import tkinter as tk
 from ctypes import wintypes, byref
 
 # --- 1. 설정 및 최적화 ---
-# Pyautogui의 기본 딜레이를 제거하여 반응 속도를 높임
 pyautogui.PAUSE = 0
 pyautogui.FAILSAFE = False
 
@@ -45,30 +44,74 @@ user32.PeekMessageW.argtypes = (ctypes.POINTER(wintypes.MSG), wintypes.HWND, cty
 user32.UnhookWindowsHookEx.argtypes = (HHOOK,)
 
 # --- 3. 전역 변수 ---
-HORIZONTAL_THRESHOLD = 15
-VERTICAL_THRESHOLD = 15
+HORIZONTAL_THRESHOLD = 50
+VERTICAL_THRESHOLD = 50
+OVERLAY_TITLE = "GestureOverlay_IgnoreMe"  # 우리 프로그램의 창 제목
 
 hook_id = None
 gesture_start_pos = None
 gesture_points = []
 visualizer = None
 
-# --- 4. 제스처 기능 함수들 ---
-def execute_minimize():
+# --- 4. 스마트 창 찾기 및 제스처 기능 ---
+
+def get_target_window(pos):
+    """
+    마우스 위치에 있는 창들 중, '제스처 시각화 창(Overlay)'을 제외한
+    가장 위에 있는 실제 앱 창을 찾습니다.
+    """
     try:
-        win = gw.getActiveWindow()
-        if win: win.minimize()
-        print("Action: 최소화")
+        # 1. 현재 마우스 좌표에 있는 모든 창을 리스트로 가져옴
+        windows_at_mouse = gw.getWindowsAt(pos[0], pos[1])
+        
+        for win in windows_at_mouse:
+            # ★ 핵심 수정: 우리 자신의 시각화 창이나 빈 제목은 무시하고 건너뜀
+            if win.title == OVERLAY_TITLE or win.title == "tk": 
+                continue
+            
+            # 정상적인 창을 찾으면 즉시 반환
+            return win
+            
+        # 2. 마우스 위치에서 적절한 창을 못 찾으면 활성 창 반환
+        return gw.getActiveWindow()
+    except:
+        return gw.getActiveWindow()
+
+def execute_minimize(pos):
+    try:
+        win = get_target_window(pos)
+        if win: 
+            win.minimize()
+            print(f"Action: 최소화 ({win.title})")
     except: pass
 
-def execute_maximize_restore():
+def execute_maximize_restore(pos):
     try:
-        win = gw.getActiveWindow()
+        win = get_target_window(pos)
         if win:
             if win.isMaximized: win.restore()
             else: win.maximize()
-        print("Action: 최대화/복구")
+            print(f"Action: 최대화/복구 ({win.title})")
     except: pass
+
+def execute_close(pos):
+    try:
+        win = get_target_window(pos)
+        if win:
+            win.close()
+            print(f"Action: 창 닫기 ({win.title})")
+    except: 
+        pyautogui.hotkey('alt', 'f4')
+
+def ensure_active_and_execute(pos, func):
+    try:
+        win = get_target_window(pos)
+        if win:
+            try:
+                win.activate()
+            except: pass
+    except: pass
+    func()
 
 def execute_next_page():
     pyautogui.hotkey('alt', 'right')
@@ -86,17 +129,10 @@ def execute_paste():
     pyautogui.hotkey('ctrl', 'v')
     print("Action: 붙여넣기")
 
-def execute_close():
-    pyautogui.hotkey('alt', 'f4')
-    print("Action: 창 닫기")
 
-# --- 5. 비동기 처리 로직 (버벅임 해결의 핵심) ---
+# --- 5. 비동기 처리 로직 ---
 
 def process_gesture_action(start_pos, end_pos):
-    """
-    제스처 분석 및 실행을 담당하는 함수.
-    훅킹 스레드가 아닌 별도의 스레드에서 실행됨.
-    """
     dx = end_pos[0] - start_pos[0]
     dy = end_pos[1] - start_pos[1]
     
@@ -104,38 +140,34 @@ def process_gesture_action(start_pos, end_pos):
     abs_dy = abs(dy)
 
     is_gesture = False
-
-    # HORIZONTAL_THRESHOLD, VERTICAL_THRESHOLD 미세 조정용 print
-    print(f"(dx, dy) = {dx, dy}")
-
-    # 제스처 판별 로직
+    
     if dx < -HORIZONTAL_THRESHOLD and dy > VERTICAL_THRESHOLD:
-        execute_minimize()
+        execute_minimize(start_pos) # ↘
         is_gesture = True
     elif dx > HORIZONTAL_THRESHOLD and dy < -VERTICAL_THRESHOLD:
-        execute_maximize_restore()
+        execute_maximize_restore(start_pos) # ↗
         is_gesture = True
     elif dx < -HORIZONTAL_THRESHOLD and dy < -VERTICAL_THRESHOLD:
-        execute_close()
+        execute_close(start_pos) # ↖
         is_gesture = True
     elif abs_dx > HORIZONTAL_THRESHOLD and abs_dy < VERTICAL_THRESHOLD:
-        if dx > 0: execute_next_page()
-        else: execute_prev_page()
+        if dx > 0: ensure_active_and_execute(start_pos, execute_next_page)
+        else: ensure_active_and_execute(start_pos, execute_prev_page)
         is_gesture = True
     elif abs_dy > VERTICAL_THRESHOLD and abs_dx < HORIZONTAL_THRESHOLD:
-        if dy < 0: execute_copy()
-        else: execute_paste()
+        if dy < 0: ensure_active_and_execute(start_pos, execute_copy)
+        else: ensure_active_and_execute(start_pos, execute_paste)
         is_gesture = True
     
-    # 제스처가 아니면 일반 우클릭 발생
     if not is_gesture:
-        # 좌표 인자 없이 호출하면 '현재 위치'에서 클릭하므로 마우스 이동(버벅임)이 발생하지 않음
         pyautogui.click(button='right')
 
-# --- 6. 시각화 클래스 (잔상 제거 버전) ---
+# --- 6. 시각화 클래스 ---
 class GestureVisualizer:
     def __init__(self):
         self.root = tk.Tk()
+        # ★ 핵심 수정: 창 제목을 설정하여 필터링할 수 있게 함
+        self.root.title(OVERLAY_TITLE)
         self.root.withdraw()
         self.root.overrideredirect(True)
         self.root.attributes('-alpha', 0.5)
@@ -180,7 +212,6 @@ def hook_proc_func(nCode, wParam, lParam):
     if nCode >= 0:
         struct = lParam.contents
         
-        # 기계적 입력(INJECTED)은 무조건 패스 (무한루프 방지)
         if struct.flags & LLMHF_INJECTED:
             return user32.CallNextHookEx(hook_id, nCode, wParam, lParam)
 
@@ -190,34 +221,27 @@ def hook_proc_func(nCode, wParam, lParam):
             gesture_start_pos = (x, y)
             gesture_points = [(x, y)]
             if visualizer: visualizer.safe_show()
-            return 1  # 즉시 차단
+            return 1
 
         elif wParam == WM_MOUSEMOVE:
             if gesture_start_pos is not None:
                 gesture_points.append((x, y))
                 if visualizer: 
                     visualizer.safe_update(gesture_points[:])
-            # 이동은 차단하지 않음 (시스템 성능 영향 최소화)
 
         elif wParam == WM_RBUTTONUP:
             if gesture_start_pos is not None:
-                # 1. 시각화 끄기 (Non-blocking)
                 if visualizer: visualizer.safe_hide()
                 
-                start_pos = gesture_start_pos # 값 복사
+                start_pos = gesture_start_pos
                 end_pos = (x, y)
                 
-                # 2. ★ 핵심 변경: 별도 스레드에서 로직 처리 ★
-                # 훅 프로시저 안에서 pyautogui를 실행하면 마우스가 멈칫함.
-                # 따라서 스레드를 띄워 "나중에 실행해"라고 던져두고 훅은 바로 리턴해야 함.
                 t = threading.Thread(target=process_gesture_action, args=(start_pos, end_pos))
                 t.start()
 
-                # 초기화
                 gesture_start_pos = None
                 gesture_points = []
-                
-                return 1  # 윈도우에게 "이미 처리됨" 신호 보냄
+                return 1
 
     return user32.CallNextHookEx(hook_id, nCode, wParam, lParam)
 
@@ -236,7 +260,6 @@ def hook_thread_func():
 
     msg = wintypes.MSG()
     while True:
-        # PeekMessage로 CPU 점유율 낮추면서 메시지 처리
         if user32.PeekMessageW(byref(msg), None, 0, 0, PM_REMOVE):
             user32.TranslateMessage(byref(msg))
             user32.DispatchMessageW(byref(msg))
@@ -245,10 +268,9 @@ def hook_thread_func():
 
 def main():
     global visualizer
-    print("=== 부드러운 마우스 제스처 (No Lag) ===")
+    print("=== 스마트 마우스 제스처 (자기 자신 무시 기능 추가) ===")
     
     visualizer = GestureVisualizer()
-
     t = threading.Thread(target=hook_thread_func, daemon=True)
     t.start()
 
