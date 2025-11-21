@@ -5,6 +5,7 @@ import threading
 import pyautogui
 import pygetwindow as gw
 import tkinter as tk
+import math  # 거리 계산을 위해 추가
 from ctypes import wintypes, byref
 
 # --- 0. 관리자 권한 강제 실행 ---
@@ -56,7 +57,6 @@ user32.CallNextHookEx.restype = LRESULT
 user32.PeekMessageW.argtypes = (ctypes.POINTER(wintypes.MSG), wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int)
 user32.UnhookWindowsHookEx.argtypes = (HHOOK,)
 
-# AttachThreadInput 및 창 제어 API
 user32.GetForegroundWindow.restype = wintypes.HWND
 user32.GetWindowThreadProcessId.argtypes = (wintypes.HWND, ctypes.POINTER(ctypes.c_ulong))
 user32.GetWindowThreadProcessId.restype = ctypes.c_ulong
@@ -68,7 +68,6 @@ user32.ShowWindow.argtypes = (wintypes.HWND, ctypes.c_int)
 user32.ShowWindow.restype = wintypes.BOOL
 user32.IsIconic.argtypes = (wintypes.HWND,)
 user32.IsIconic.restype = wintypes.BOOL
-# ★ 추가: 화면 맨 위로 올리는 강력한 API
 user32.BringWindowToTop.argtypes = (wintypes.HWND,)
 user32.BringWindowToTop.restype = wintypes.BOOL
 kernel32.GetCurrentThreadId.restype = ctypes.c_ulong
@@ -76,6 +75,8 @@ kernel32.GetCurrentThreadId.restype = ctypes.c_ulong
 # --- 3. 전역 변수 ---
 HORIZONTAL_THRESHOLD = 15
 VERTICAL_THRESHOLD = 15
+# ★ 최적화 설정: 최소 이만큼 움직여야 좌표를 저장함 (픽셀 단위)
+MIN_MOVE_DISTANCE = 5  
 OVERLAY_TITLE = "GestureOverlay_IgnoreMe"
 
 hook_id = None
@@ -96,16 +97,12 @@ def get_target_window(pos):
     except:
         return gw.getActiveWindow()
 
-# ★ 핵심 수정: 재시도 로직(Retry)과 BringWindowToTop 추가
 def force_activate(win):
     if not win: return
     
     hwnd = win._hWnd
-    
-    # 최대 5번 시도 (성공할 때까지)
     for i in range(5):
         try:
-            # 이미 맨 앞이라면 중단
             if user32.GetForegroundWindow() == hwnd:
                 break
 
@@ -114,28 +111,20 @@ def force_activate(win):
             my_thread_id = kernel32.GetCurrentThreadId()
             
             is_minimized = user32.IsIconic(hwnd)
-            # 최소화 상태면 SW_RESTORE(9), 아니면 SW_SHOW(5)
             show_cmd = 9 if is_minimized else 5
 
             if foreground_thread_id != my_thread_id:
-                # 1. 스레드 연결
                 user32.AttachThreadInput(foreground_thread_id, my_thread_id, True)
-                
-                # 2. 명령 난사 (BringWindowToTop 추가)
-                user32.BringWindowToTop(hwnd)   # Z-Order 위로
-                user32.SetForegroundWindow(hwnd) # 포커스 이동
-                user32.ShowWindow(hwnd, show_cmd) # 화면 표시
-                
-                # 3. 연결 해제
+                user32.BringWindowToTop(hwnd)
+                user32.SetForegroundWindow(hwnd)
+                user32.ShowWindow(hwnd, show_cmd)
                 user32.AttachThreadInput(foreground_thread_id, my_thread_id, False)
             else:
                 user32.BringWindowToTop(hwnd)
                 user32.SetForegroundWindow(hwnd)
                 user32.ShowWindow(hwnd, show_cmd)
             
-            # 실패했을 경우를 대비해 아주 짧게 대기 후 재시도
             time.sleep(0.02)
-            
         except Exception as e:
             print(f"Force activate failed: {e}")
             time.sleep(0.02)
@@ -152,16 +141,9 @@ def execute_maximize_restore(pos):
     try:
         win = get_target_window(pos)
         if win:
-            # 상태 저장
             was_maximized = win.isMaximized
-            
-            # 활성화 시도 (이제 끈질기게 시도함)
             force_activate(win)
-            
-            # 윈도우 애니메이션 등을 고려해 약간의 여유
             time.sleep(0.05)
-            
-            # 상태 토글
             if was_maximized: 
                 win.restore()
                 print(f"Action: 복구 (이전 상태: 최대화) - {win.title}")
@@ -204,14 +186,9 @@ def execute_paste():
     pyautogui.hotkey('ctrl', 'v')
     print("Action: 붙여넣기")
 
-
-# --- 5. 비동기 처리 로직 ---
-
 def process_gesture_action(start_pos, end_pos):
     dx = end_pos[0] - start_pos[0]
     dy = end_pos[1] - start_pos[1]
-    
-    # print(f"(dx, dy) = {dx, dy}")
     
     abs_dx = abs(dx)
     abs_dy = abs(dy)
@@ -219,13 +196,13 @@ def process_gesture_action(start_pos, end_pos):
     is_gesture = False
     
     if dx < -HORIZONTAL_THRESHOLD and dy > VERTICAL_THRESHOLD:
-        execute_minimize(start_pos) # ↘
+        execute_minimize(start_pos)
         is_gesture = True
     elif dx > HORIZONTAL_THRESHOLD and dy < -VERTICAL_THRESHOLD:
-        execute_maximize_restore(start_pos) # ↗
+        execute_maximize_restore(start_pos)
         is_gesture = True
     elif dx < -HORIZONTAL_THRESHOLD and dy < -VERTICAL_THRESHOLD:
-        execute_close(start_pos) # ↖
+        execute_close(start_pos)
         is_gesture = True
     elif abs_dx > HORIZONTAL_THRESHOLD and abs_dy < VERTICAL_THRESHOLD:
         if dx > 0: ensure_active_and_execute(start_pos, execute_next_page)
@@ -301,6 +278,16 @@ def hook_proc_func(nCode, wParam, lParam):
 
         elif wParam == WM_MOUSEMOVE:
             if gesture_start_pos is not None:
+                # ★ 최적화 적용: 마지막 좌표와 현재 좌표의 거리를 계산
+                # 너무 조금 움직였으면(5픽셀 미만) 저장하지 않음 -> 그리기 부하 대폭 감소
+                if gesture_points:
+                    last_x, last_y = gesture_points[-1]
+                    dist = math.sqrt((x - last_x)**2 + (y - last_y)**2)
+                    
+                    if dist < MIN_MOVE_DISTANCE:
+                        # 저장 안 하고 패스
+                        return user32.CallNextHookEx(hook_id, nCode, wParam, lParam)
+
                 gesture_points.append((x, y))
                 if visualizer: 
                     visualizer.safe_update(gesture_points[:])
