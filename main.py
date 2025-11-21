@@ -5,7 +5,6 @@ import threading
 import pyautogui
 import pygetwindow as gw
 import tkinter as tk
-# math 모듈 제거 (제곱근 안 씀)
 from ctypes import wintypes, byref
 
 # --- 0. 관리자 권한 ---
@@ -67,10 +66,11 @@ kernel32.GetCurrentThreadId.restype = ctypes.c_ulong
 # --- 3. 전역 변수 및 최적화 상수 ---
 HORIZONTAL_THRESHOLD = 15
 VERTICAL_THRESHOLD = 15
+MIN_MOVE_DIST_SQ = 25  # 5픽셀 이동 제한
 
-# ★ 최적화 1: 제곱근 계산을 피하기 위해 '거리의 제곱'을 기준값으로 사용
-# 5픽셀 * 5픽셀 = 25
-MIN_MOVE_DIST_SQ = 25 
+# ★ 추가된 최적화: 제스처 포인트 개수 제한 (너무 길면 취소)
+# 100개 * 5px = 약 500px 이상 이동하면 취소됨
+MAX_GESTURE_POINTS = 100 
 
 OVERLAY_TITLE = "GestureOverlay_IgnoreMe"
 
@@ -96,7 +96,6 @@ def force_activate(win):
     for i in range(5):
         try:
             if user32.GetForegroundWindow() == hwnd: break
-            
             fg_hwnd = user32.GetForegroundWindow()
             fg_tid = user32.GetWindowThreadProcessId(fg_hwnd, None)
             my_tid = kernel32.GetCurrentThreadId()
@@ -148,7 +147,6 @@ def ensure_active_and_execute(pos, func):
     except: pass
     func()
 
-# 기능 맵핑
 def execute_next_page(): pyautogui.hotkey('alt', 'right'); print("Action: Next")
 def execute_prev_page(): pyautogui.hotkey('alt', 'left'); print("Action: Prev")
 def execute_copy(): pyautogui.hotkey('ctrl', 'c'); print("Action: Copy")
@@ -172,7 +170,7 @@ def process_gesture_action(start_pos, end_pos):
     
     if not is_gesture: pyautogui.click(button='right')
 
-# --- 6. 시각화 클래스 (객체 재사용 최적화 적용) ---
+# --- 6. 시각화 클래스 (객체 재사용) ---
 class GestureVisualizer:
     def __init__(self):
         self.root = tk.Tk()
@@ -187,24 +185,19 @@ class GestureVisualizer:
         self.canvas = tk.Canvas(self.root, bg='black', highlightthickness=0)
         self.canvas.pack(fill="both", expand=True)
         
-        # ★ 최적화 2: 선 객체를 미리 하나 만들어둠 (처음엔 숨김 상태)
         self.line_id = self.canvas.create_line(0, 0, 0, 0, fill='magenta', width=3, capstyle=tk.ROUND, joinstyle=tk.ROUND, smooth=True, state='hidden')
 
     def start_drawing(self):
-        # 시작할 때 선 좌표 초기화하고 숨김 해제
         self.canvas.coords(self.line_id, 0, 0, 0, 0)
-        self.canvas.itemconfigure(self.line_id, state='normal') # 보이기
+        self.canvas.itemconfigure(self.line_id, state='normal')
         self.root.deiconify()
 
     def update_line(self, points):
         if len(points) > 1:
             flat_points = [coord for point in points for coord in point]
-            # ★ 최적화 2 핵심: delete/create 대신 coords만 수정
-            # 기존 객체의 좌표만 바꾸는 것이 훨씬 빠름
             self.canvas.coords(self.line_id, *flat_points)
 
     def stop_drawing(self):
-        # 다 쓰면 선을 숨기고 창도 숨김
         self.canvas.itemconfigure(self.line_id, state='hidden')
         self.canvas.update_idletasks()
         self.root.withdraw()
@@ -236,17 +229,25 @@ def hook_proc_func(nCode, wParam, lParam):
 
         elif wParam == WM_MOUSEMOVE:
             if gesture_start_pos is not None:
+                # ★ CPU 방어 코드: 너무 길어지면 추적 중단하고 빠져나감
+                if len(gesture_points) > MAX_GESTURE_POINTS:
+                    gesture_start_pos = None
+                    gesture_points = []
+                    if visualizer: visualizer.safe_hide()
+                    # 이후 움직임은 시스템에 맡김 (차단 안 함)
+                    return user32.CallNextHookEx(hook_id, nCode, wParam, lParam)
+
                 if gesture_points:
                     last_x, last_y = gesture_points[-1]
-                    # ★ 최적화 1: 제곱근 없이 거리 제곱 비교 (sqrt 제거)
                     dist_sq = (x - last_x)**2 + (y - last_y)**2
-                    if dist_sq < MIN_MOVE_DIST_SQ: # 25 (5^2) 보다 작으면 무시
+                    if dist_sq < MIN_MOVE_DIST_SQ: 
                         return user32.CallNextHookEx(hook_id, nCode, wParam, lParam)
 
                 gesture_points.append((x, y))
                 if visualizer: visualizer.safe_update(gesture_points[:])
 
         elif wParam == WM_RBUTTONUP:
+            # gesture_start_pos가 None이면(길이 초과로 취소된 경우) 여기 안 걸리고 아래로 통과됨
             if gesture_start_pos is not None:
                 if visualizer: visualizer.safe_hide()
                 start_pos = gesture_start_pos
@@ -256,6 +257,7 @@ def hook_proc_func(nCode, wParam, lParam):
                 gesture_start_pos = None
                 gesture_points = []
                 return 1
+
     return user32.CallNextHookEx(hook_id, nCode, wParam, lParam)
 
 pointer = HOOKPROC(hook_proc_func)
