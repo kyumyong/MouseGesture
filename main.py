@@ -44,8 +44,8 @@ user32.PeekMessageW.argtypes = (ctypes.POINTER(wintypes.MSG), wintypes.HWND, cty
 user32.UnhookWindowsHookEx.argtypes = (HHOOK,)
 
 # --- 3. 전역 변수 ---
-HORIZONTAL_THRESHOLD = 50
-VERTICAL_THRESHOLD = 50
+HORIZONTAL_THRESHOLD = 15
+VERTICAL_THRESHOLD = 15
 OVERLAY_TITLE = "GestureOverlay_IgnoreMe"  # 우리 프로그램의 창 제목
 
 hook_id = None
@@ -140,6 +140,9 @@ def process_gesture_action(start_pos, end_pos):
     abs_dy = abs(dy)
 
     is_gesture = False
+
+    # HORIZONTAL_THRESHOLD, VERTICAL_THRESHOLD 미세 조정용 print
+    print(f"(dx, dy) = {dx, dy}")
     
     if dx < -HORIZONTAL_THRESHOLD and dy > VERTICAL_THRESHOLD:
         execute_minimize(start_pos) # ↘
@@ -186,7 +189,9 @@ class GestureVisualizer:
         self.canvas.delete("all")
         if len(points) > 1:
             flat_points = [coord for point in points for coord in point]
-            self.canvas.create_line(flat_points, fill='green', width=3, capstyle=tk.ROUND, smooth=True)
+            
+            # 'yellow', 'cyan', 'magenta' 중 취향에 맞는 색을 선택하세요.
+            self.canvas.create_line(flat_points, fill='magenta', width=3, capstyle=tk.ROUND, joinstyle=tk.ROUND, smooth=True)
 
     def stop_drawing(self):
         self.canvas.delete("all")
