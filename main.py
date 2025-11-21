@@ -5,10 +5,9 @@ import threading
 import pyautogui
 import pygetwindow as gw
 import tkinter as tk
-import os
 from ctypes import wintypes, byref
 
-# --- 0. 관리자 권한 강제 실행 (핵심 추가 사항) ---
+# --- 0. 관리자 권한 강제 실행 ---
 def is_admin():
     try:
         return ctypes.windll.shell32.IsUserAnAdmin()
@@ -16,9 +15,6 @@ def is_admin():
         return False
 
 if not is_admin():
-    print("관리자 권한이 없어 요청합니다...")
-    # 현재 스크립트를 관리자 권한('runas')으로 재실행
-    # 파이썬 인터프리터(sys.executable)로 현재 파일(__file__)을 실행
     ctypes.windll.shell32.ShellExecuteW(
         None, "runas", sys.executable, ' '.join([f'"{arg}"' for arg in sys.argv]), None, 1
     )
@@ -60,8 +56,22 @@ user32.CallNextHookEx.restype = LRESULT
 user32.PeekMessageW.argtypes = (ctypes.POINTER(wintypes.MSG), wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int)
 user32.UnhookWindowsHookEx.argtypes = (HHOOK,)
 
-user32.SwitchToThisWindow.argtypes = (wintypes.HWND, wintypes.BOOL)
-user32.SwitchToThisWindow.restype = None
+# AttachThreadInput 및 창 제어 API
+user32.GetForegroundWindow.restype = wintypes.HWND
+user32.GetWindowThreadProcessId.argtypes = (wintypes.HWND, ctypes.POINTER(ctypes.c_ulong))
+user32.GetWindowThreadProcessId.restype = ctypes.c_ulong
+user32.AttachThreadInput.argtypes = (ctypes.c_ulong, ctypes.c_ulong, wintypes.BOOL)
+user32.AttachThreadInput.restype = wintypes.BOOL
+user32.SetForegroundWindow.argtypes = (wintypes.HWND,)
+user32.SetForegroundWindow.restype = wintypes.BOOL
+user32.ShowWindow.argtypes = (wintypes.HWND, ctypes.c_int)
+user32.ShowWindow.restype = wintypes.BOOL
+user32.IsIconic.argtypes = (wintypes.HWND,)
+user32.IsIconic.restype = wintypes.BOOL
+# ★ 추가: 화면 맨 위로 올리는 강력한 API
+user32.BringWindowToTop.argtypes = (wintypes.HWND,)
+user32.BringWindowToTop.restype = wintypes.BOOL
+kernel32.GetCurrentThreadId.restype = ctypes.c_ulong
 
 # --- 3. 전역 변수 ---
 HORIZONTAL_THRESHOLD = 15
@@ -86,12 +96,49 @@ def get_target_window(pos):
     except:
         return gw.getActiveWindow()
 
+# ★ 핵심 수정: 재시도 로직(Retry)과 BringWindowToTop 추가
 def force_activate(win):
-    try:
-        if win:
-            user32.SwitchToThisWindow(win._hWnd, True)
-    except Exception as e:
-        print(f"Force activate failed: {e}")
+    if not win: return
+    
+    hwnd = win._hWnd
+    
+    # 최대 5번 시도 (성공할 때까지)
+    for i in range(5):
+        try:
+            # 이미 맨 앞이라면 중단
+            if user32.GetForegroundWindow() == hwnd:
+                break
+
+            foreground_hwnd = user32.GetForegroundWindow()
+            foreground_thread_id = user32.GetWindowThreadProcessId(foreground_hwnd, None)
+            my_thread_id = kernel32.GetCurrentThreadId()
+            
+            is_minimized = user32.IsIconic(hwnd)
+            # 최소화 상태면 SW_RESTORE(9), 아니면 SW_SHOW(5)
+            show_cmd = 9 if is_minimized else 5
+
+            if foreground_thread_id != my_thread_id:
+                # 1. 스레드 연결
+                user32.AttachThreadInput(foreground_thread_id, my_thread_id, True)
+                
+                # 2. 명령 난사 (BringWindowToTop 추가)
+                user32.BringWindowToTop(hwnd)   # Z-Order 위로
+                user32.SetForegroundWindow(hwnd) # 포커스 이동
+                user32.ShowWindow(hwnd, show_cmd) # 화면 표시
+                
+                # 3. 연결 해제
+                user32.AttachThreadInput(foreground_thread_id, my_thread_id, False)
+            else:
+                user32.BringWindowToTop(hwnd)
+                user32.SetForegroundWindow(hwnd)
+                user32.ShowWindow(hwnd, show_cmd)
+            
+            # 실패했을 경우를 대비해 아주 짧게 대기 후 재시도
+            time.sleep(0.02)
+            
+        except Exception as e:
+            print(f"Force activate failed: {e}")
+            time.sleep(0.02)
 
 def execute_minimize(pos):
     try:
@@ -105,11 +152,22 @@ def execute_maximize_restore(pos):
     try:
         win = get_target_window(pos)
         if win:
+            # 상태 저장
+            was_maximized = win.isMaximized
+            
+            # 활성화 시도 (이제 끈질기게 시도함)
             force_activate(win)
-            time.sleep(0.05) 
-            if win.isMaximized: win.restore()
-            else: win.maximize()
-            print(f"Action: 최대화/복구 ({win.title})")
+            
+            # 윈도우 애니메이션 등을 고려해 약간의 여유
+            time.sleep(0.05)
+            
+            # 상태 토글
+            if was_maximized: 
+                win.restore()
+                print(f"Action: 복구 (이전 상태: 최대화) - {win.title}")
+            else: 
+                win.maximize()
+                print(f"Action: 최대화 (이전 상태: 일반) - {win.title}")
     except: pass
 
 def execute_close(pos):
@@ -153,7 +211,7 @@ def process_gesture_action(start_pos, end_pos):
     dx = end_pos[0] - start_pos[0]
     dy = end_pos[1] - start_pos[1]
     
-    print(f"(dx, dy) = {dx, dy}")
+    # print(f"(dx, dy) = {dx, dy}")
     
     abs_dx = abs(dx)
     abs_dy = abs(dy)
