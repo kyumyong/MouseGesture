@@ -5,7 +5,24 @@ import threading
 import pyautogui
 import pygetwindow as gw
 import tkinter as tk
+import os
 from ctypes import wintypes, byref
+
+# --- 0. 관리자 권한 강제 실행 (핵심 추가 사항) ---
+def is_admin():
+    try:
+        return ctypes.windll.shell32.IsUserAnAdmin()
+    except:
+        return False
+
+if not is_admin():
+    print("관리자 권한이 없어 요청합니다...")
+    # 현재 스크립트를 관리자 권한('runas')으로 재실행
+    # 파이썬 인터프리터(sys.executable)로 현재 파일(__file__)을 실행
+    ctypes.windll.shell32.ShellExecuteW(
+        None, "runas", sys.executable, ' '.join([f'"{arg}"' for arg in sys.argv]), None, 1
+    )
+    sys.exit()
 
 # --- 1. 설정 및 최적화 ---
 pyautogui.PAUSE = 0
@@ -43,7 +60,6 @@ user32.CallNextHookEx.restype = LRESULT
 user32.PeekMessageW.argtypes = (ctypes.POINTER(wintypes.MSG), wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int)
 user32.UnhookWindowsHookEx.argtypes = (HHOOK,)
 
-# ★ 핵심 추가: 강제로 창 전환을 하는 API 정의
 user32.SwitchToThisWindow.argtypes = (wintypes.HWND, wintypes.BOOL)
 user32.SwitchToThisWindow.restype = None
 
@@ -70,12 +86,9 @@ def get_target_window(pos):
     except:
         return gw.getActiveWindow()
 
-# ★ 핵심 함수: 창을 강제로 맨 앞으로 가져오기
 def force_activate(win):
     try:
         if win:
-            # SwitchToThisWindow(Handle, TurnOn)
-            # True 옵션은 창을 활성화하고 최소화되어 있으면 복구까지 시도함
             user32.SwitchToThisWindow(win._hWnd, True)
     except Exception as e:
         print(f"Force activate failed: {e}")
@@ -92,12 +105,8 @@ def execute_maximize_restore(pos):
     try:
         win = get_target_window(pos)
         if win:
-            # ★ 수정: 강제 활성화 적용
             force_activate(win)
-            
-            # 잠시 대기하여 윈도우가 포커스를 잡을 시간을 줌 (아주 짧게)
             time.sleep(0.05) 
-
             if win.isMaximized: win.restore()
             else: win.maximize()
             print(f"Action: 최대화/복구 ({win.title})")
