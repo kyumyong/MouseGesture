@@ -43,10 +43,12 @@ user32.CallNextHookEx.restype = LRESULT
 user32.PeekMessageW.argtypes = (ctypes.POINTER(wintypes.MSG), wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int)
 user32.UnhookWindowsHookEx.argtypes = (HHOOK,)
 
-# --- 3. 전역 변수 ---
+# --- 3. 전역 변수 (수정됨) ---
+# ★ 수정 1: 감도를 50 -> 15로 변경 (작은 움직임도 인식)
 HORIZONTAL_THRESHOLD = 15
 VERTICAL_THRESHOLD = 15
-OVERLAY_TITLE = "GestureOverlay_IgnoreMe"  # 우리 프로그램의 창 제목
+
+OVERLAY_TITLE = "GestureOverlay_IgnoreMe"
 
 hook_id = None
 gesture_start_pos = None
@@ -56,23 +58,12 @@ visualizer = None
 # --- 4. 스마트 창 찾기 및 제스처 기능 ---
 
 def get_target_window(pos):
-    """
-    마우스 위치에 있는 창들 중, '제스처 시각화 창(Overlay)'을 제외한
-    가장 위에 있는 실제 앱 창을 찾습니다.
-    """
     try:
-        # 1. 현재 마우스 좌표에 있는 모든 창을 리스트로 가져옴
         windows_at_mouse = gw.getWindowsAt(pos[0], pos[1])
-        
         for win in windows_at_mouse:
-            # ★ 핵심 수정: 우리 자신의 시각화 창이나 빈 제목은 무시하고 건너뜀
             if win.title == OVERLAY_TITLE or win.title == "tk": 
                 continue
-            
-            # 정상적인 창을 찾으면 즉시 반환
             return win
-            
-        # 2. 마우스 위치에서 적절한 창을 못 찾으면 활성 창 반환
         return gw.getActiveWindow()
     except:
         return gw.getActiveWindow()
@@ -130,19 +121,20 @@ def execute_paste():
     print("Action: 붙여넣기")
 
 
-# --- 5. 비동기 처리 로직 ---
+# --- 5. 비동기 처리 로직 (수정됨) ---
 
 def process_gesture_action(start_pos, end_pos):
     dx = end_pos[0] - start_pos[0]
     dy = end_pos[1] - start_pos[1]
     
+    # ★ 수정 2: 튜닝용 값 출력
+    # HORIZONTAL_THRESHOLD, VERTICAL_THRESHOLD 미세 조정용 print
+    print(f"(dx, dy) = {dx, dy}")
+    
     abs_dx = abs(dx)
     abs_dy = abs(dy)
 
     is_gesture = False
-
-    # HORIZONTAL_THRESHOLD, VERTICAL_THRESHOLD 미세 조정용 print
-    print(f"(dx, dy) = {dx, dy}")
     
     if dx < -HORIZONTAL_THRESHOLD and dy > VERTICAL_THRESHOLD:
         execute_minimize(start_pos) # ↘
@@ -169,7 +161,6 @@ def process_gesture_action(start_pos, end_pos):
 class GestureVisualizer:
     def __init__(self):
         self.root = tk.Tk()
-        # ★ 핵심 수정: 창 제목을 설정하여 필터링할 수 있게 함
         self.root.title(OVERLAY_TITLE)
         self.root.withdraw()
         self.root.overrideredirect(True)
@@ -189,8 +180,6 @@ class GestureVisualizer:
         self.canvas.delete("all")
         if len(points) > 1:
             flat_points = [coord for point in points for coord in point]
-            
-            # 'yellow', 'cyan', 'magenta' 중 취향에 맞는 색을 선택하세요.
             self.canvas.create_line(flat_points, fill='magenta', width=3, capstyle=tk.ROUND, joinstyle=tk.ROUND, smooth=True)
 
     def stop_drawing(self):
@@ -273,7 +262,6 @@ def hook_thread_func():
 
 def main():
     global visualizer
-    print("=== 스마트 마우스 제스처 (자기 자신 무시 기능 추가) ===")
     
     visualizer = GestureVisualizer()
     t = threading.Thread(target=hook_thread_func, daemon=True)
