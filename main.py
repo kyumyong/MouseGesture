@@ -43,11 +43,13 @@ user32.CallNextHookEx.restype = LRESULT
 user32.PeekMessageW.argtypes = (ctypes.POINTER(wintypes.MSG), wintypes.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int)
 user32.UnhookWindowsHookEx.argtypes = (HHOOK,)
 
-# --- 3. 전역 변수 (수정됨) ---
-# ★ 수정 1: 감도를 50 -> 15로 변경 (작은 움직임도 인식)
+# ★ 핵심 추가: 강제로 창 전환을 하는 API 정의
+user32.SwitchToThisWindow.argtypes = (wintypes.HWND, wintypes.BOOL)
+user32.SwitchToThisWindow.restype = None
+
+# --- 3. 전역 변수 ---
 HORIZONTAL_THRESHOLD = 15
 VERTICAL_THRESHOLD = 15
-
 OVERLAY_TITLE = "GestureOverlay_IgnoreMe"
 
 hook_id = None
@@ -68,6 +70,16 @@ def get_target_window(pos):
     except:
         return gw.getActiveWindow()
 
+# ★ 핵심 함수: 창을 강제로 맨 앞으로 가져오기
+def force_activate(win):
+    try:
+        if win:
+            # SwitchToThisWindow(Handle, TurnOn)
+            # True 옵션은 창을 활성화하고 최소화되어 있으면 복구까지 시도함
+            user32.SwitchToThisWindow(win._hWnd, True)
+    except Exception as e:
+        print(f"Force activate failed: {e}")
+
 def execute_minimize(pos):
     try:
         win = get_target_window(pos)
@@ -80,6 +92,12 @@ def execute_maximize_restore(pos):
     try:
         win = get_target_window(pos)
         if win:
+            # ★ 수정: 강제 활성화 적용
+            force_activate(win)
+            
+            # 잠시 대기하여 윈도우가 포커스를 잡을 시간을 줌 (아주 짧게)
+            time.sleep(0.05) 
+
             if win.isMaximized: win.restore()
             else: win.maximize()
             print(f"Action: 최대화/복구 ({win.title})")
@@ -89,6 +107,7 @@ def execute_close(pos):
     try:
         win = get_target_window(pos)
         if win:
+            force_activate(win)
             win.close()
             print(f"Action: 창 닫기 ({win.title})")
     except: 
@@ -98,9 +117,7 @@ def ensure_active_and_execute(pos, func):
     try:
         win = get_target_window(pos)
         if win:
-            try:
-                win.activate()
-            except: pass
+            force_activate(win)
     except: pass
     func()
 
@@ -121,14 +138,12 @@ def execute_paste():
     print("Action: 붙여넣기")
 
 
-# --- 5. 비동기 처리 로직 (수정됨) ---
+# --- 5. 비동기 처리 로직 ---
 
 def process_gesture_action(start_pos, end_pos):
     dx = end_pos[0] - start_pos[0]
     dy = end_pos[1] - start_pos[1]
     
-    # ★ 수정 2: 튜닝용 값 출력
-    # HORIZONTAL_THRESHOLD, VERTICAL_THRESHOLD 미세 조정용 print
     print(f"(dx, dy) = {dx, dy}")
     
     abs_dx = abs(dx)
