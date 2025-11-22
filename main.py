@@ -21,6 +21,18 @@ if not is_admin():
     ctypes.windll.shell32.ShellExecuteW(None, "runas", sys.executable, ' '.join([f'"{arg}"' for arg in sys.argv]), None, 1)
     sys.exit()
 
+# ★ [추가] EXE 안에 포함된 파일 경로를 찾아주는 함수
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller가 생성하는 임시 폴더(_MEIPASS) 경로 확인
+        base_path = sys._MEIPASS
+    except Exception:
+        # 평소 개발 중일 때는 현재 폴더 경로
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
+    
 # --- 1. 설정 ---
 pyautogui.PAUSE = 0
 pyautogui.FAILSAFE = False
@@ -211,14 +223,24 @@ def global_hook_proc(nCode, wParam, lParam):
         return current_app_instance.hook_callback(nCode, wParam, lParam)
     return user32.CallNextHookEx(None, nCode, wParam, lParam)
 
-# ★ 트레이 아이콘 이미지 생성 함수 (동그라미 그리기)
+# ★ [수정] 에러 확인용 트레이 아이콘 함수
 def create_tray_icon():
-    # 64x64 크기의 투명 배경 이미지 생성
-    image = Image.new('RGBA', (64, 64), (0, 0, 0, 0))
-    dc = ImageDraw.Draw(image)
-    # 마젠타색 원 그리기
-    dc.ellipse((10, 10, 54, 54), fill='magenta', outline='white')
-    return image
+    try:
+        # 1. 경로 확인
+        image_path = resource_path("icon.png")
+        
+        # 2. 이미지 로드
+        return Image.open(image_path)
+    except Exception as e:
+        # ★ 에러가 나면 원인을 팝업창으로 띄워줍니다.
+        error_msg = f"아이콘 로드 실패!\n\n오류 내용: {e}\n\n시도한 경로: {resource_path('icon.png')}"
+        ctypes.windll.user32.MessageBoxW(0, error_msg, "오류 발생", 0x10)
+        
+        # 실패 시 기본 동그라미 그리기
+        image = Image.new('RGBA', (64, 64), (0, 0, 0, 0))
+        dc = ImageDraw.Draw(image)
+        dc.ellipse((10, 10, 54, 54), fill='magenta', outline='white')
+        return image
 
 class MouseGestureApp:
     def __init__(self):

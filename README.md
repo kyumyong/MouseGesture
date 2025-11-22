@@ -1,16 +1,83 @@
-# 동작
--마우스 우클릭만하고 드래그하지 않는 경우는 정상 동작하기
--마우스 우클릭 후 드래그할 때, (x축 이동거리가 절댓값 horizontal_threshold보다 크거나 y축 이동거리가 절댓값 vertical_threshold보다 크다면), (block_right_click_final.py 기능인 윈도우의 마우스 이벤트가 애플리케이션에 전달되기 전에 해당 이벤트를 가로채서 제거함으로써 마우스 우클릭 메뉴와 드래그 영역 표시가 나타나지 않도록 하고), and (정의된 제스처 조건을 만족하면 해당 동작을 실행하기) 
--이 프로그램이 실행되는 동안은, 위의 제스처 인식 기능이 항상 작동해야 함
+# 🖱️ Windows Mouse Gesture Tool
+파이썬으로 제작된 가볍고 강력한 윈도우용 마우스 제스처 프로그램입니다.마우스 우클릭 드래그를 통해 웹 브라우징 탐색, 창 제어, 복사/붙여넣기 등의 작업을 빠르게 수행할 수 있습니다.
 
-## To do
--동작하지 않는 경우가 있어서 소스코드 수정이 필요해. 여러 앱이 바탕화면 위에 열려있을 때, 예를 들어 바탕화면 위에 파일 탐색기, 그 위에 메모장이 열려있는 경우에 메모장에 창 최소화 제스처를 하면 잘 동작해. 그러면 파일 탐색기가 가장 위에 열려있게 되는데, 곧바로 파일 탐색기에 창 최소화 제스처를 하면 파일 탐색기는 창 최소화가 되지 않아. 메모장이 창 최소화가 된 후에 파일 탐색기가 가장 위에 열려는 있지만, 다른 앱이 위에 있는 것처럼 투명하게 되어 있는게 원인인 것 같아->O
--HORIZONTAL_THRESHOLD=15, VERTICAL_THRESHOLD=15 수정 요청->O
--어두운 화면과 밝은 화면 모두에서 잘 보이는 색으로 변경->O
--뒤에 가려져 있는 앱에 창 최대화/복구를 했을 때, 가장 위로 나왔으면 좋겠음->O
--키움증권 영웅문 HTS에서는 동작하지 않음->O
--마우스 우클릭 후 드래그를 너무 오래 하면 좌표 저장을 많이 하므로, 좌표 저장 상한선 만들기 <- 이건 큰 영향없고, 연산량 줄이기 위해 마우스를 MIN_MOVE_DISTANCE(5)픽셀 이상 움직일 때만 점을 저장하고 선을 업데이트->O
--close 기능을 close_window와 close_tab 으로 분리
--지금 코드를 shell:startup 폴더에 넣으면, 컴퓨터를 켤 때마다 "이 프로그램을 허용하시겠습니까?" (UAC 알림) 창이 떠서 매번 [예]를 눌러줘야 하는 불편함이 생길 수 있습니다.이걸 해결하고 컴퓨터 켜자마자 조용히 관리자 권한으로 실행되게 하려면, **'작업 스케줄러'**를 사용해야 합니다
--pyinstaller 이용해서 .exe 파일 하나로 묶기
--리팩토링
+# 🚀 제스처 목록 (Gestures)
+마우스 **우클릭(Right-Click)**을 누른 상태로 드래그하세요.
+
+| 동작 (Direction) | 기능 (Function) | 단축키 매핑 |
+| :--- | :--- | :--- |
+| → (우) | 다음 페이지 (Forward) | Alt + Right |
+| ← (좌) | 이전 페이지 (Back) | Alt + Left |
+| ↓ (하) | 붙여넣기 (Paste) | Ctrl + V |
+| ↑ (상) | 복사 (Copy) | Ctrl + C |
+| ↘ (우하 대각선) | 탭 닫기 (Close Tab) | Ctrl + W |
+| ↖ (좌상 대각선) | 창 닫기 (Close Window) | Alt + F4 |
+| ↗ (우상 대각선) | 최대화/복원 (Maximize) | Window Maximize/Restore |
+| ↙ (좌하 대각선) | 최소화 (Minimize) | Window Minimize |
+
+# ✨ 주요 기능 (Key Features)
+    - 최적화: 적은 리소스를 사용하여 CPU, 메모리 등에 부담이 가지 않습니다. 
+    - 제스처 시각화: 제스처를 그릴 때 화면에 **마젠타색 선(Trail)**이 표시되어 직관적입니다.
+    - 잔상 제거 최적화: 투명 오버레이 창을 항상 유지하여 깜빡임이나 잔상이 전혀 없습니다.
+    - 트레이 아이콘 지원: 시스템 트레이에서 프로그램 상태를 확인하고 종료할 수 있습니다.
+    - 자동 실행 지원: install.bat를 통해 관리자 권한 확인(UAC) 창 없이 윈도우 시작 시 자동 실행됩니다.
+
+# 🛠️ 개발 환경 설정 (Development)
+이 프로젝트는 uv 패키지 매니저를 기반으로 작성되었습니다. (pip 사용 가능)
+
+1. 필수 라이브러리 설치
+
+```
+# uv 사용 시
+uv add pyautogui pygetwindow pystray pillow pyinstaller
+```
+
+```
+# pip 사용 시
+pip install pyautogui pygetwindow pystray pillow pyinstaller
+```
+
+2. 소스 코드 실행
+
+```
+uv run main.py
+```
+
+# 📦 배포 파일 생성 (Build EXE)
+다른 사람에게 배포하기 위해 단일 실행 파일(.exe)로 만듭니다.주의: 빌드 전에 icon.png와 MouseGesture.ico 파일이 프로젝트 폴더에 있어야 합니다.
+
+```
+uv run pyinstaller --onefile --noconsole --uac-admin --name "MouseGesture" --icon="MouseGesture.ico" --add-data "icon.png;." main.py
+```
+
+--onefile: 파일 하나로 압축
+
+--noconsole: 검은색 콘솔 창 숨김
+
+--uac-admin: 관리자 권한 자동 요청
+
+--add-data: 트레이 아이콘용 이미지 포함
+
+# 💿 설치 및 자동 실행 (Installation)
+배포받은 사용자는 별도의 파이썬 설치가 필요 없습니다.
+1. MouseGesture.exe와 install.bat 파일을 같은 폴더에 둡니다.
+2. install.bat 파일을 마우스 우클릭하여 **[관리자 권한으로 실행]**을 클릭합니다.
+3. 설정이 완료되면, 다음 부팅부터 관리자 권한 확인 창 없이 자동으로 실행됩니다.
+
+- 파일 구성
+```text
+MouseGesture/
+├── MouseGesture.exe  (실행 프로그램)
+└── install.bat       (자동 실행 등록 스크립트)
+```
+
+# ⚠️ 문제 해결 (Troubleshooting)
+- 실행 시 반응이 없나요?
+    - 시스템 트레이(시계 옆)에 보라색 화살표 아이콘이 있는지 확인하세요.
+- 자동 실행이 안 되나요?
+    - 노트북의 경우 배터리 모드에서 작업 스케줄러가 차단될 수 있습니다. install.bat는 이를 자동으로 해제하도록 패치되어 있으니 다시 한번 관리자 권한으로 실행해 보세요.
+- 백신 프로그램 경고
+    - 개인이 만든 프로그램(서명 없음)이므로 Windows Defender가 경고를 띄울 수 있습니다. **[추가 정보] -> [실행]**을 눌러주세요.
+
+# 📝 라이선스
+This project is for personal use. Feel free to modify and distribute.
