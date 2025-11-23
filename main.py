@@ -356,3 +356,4 @@ class MouseGestureApp:
 if __name__ == "__main__":
     app = MouseGestureApp()
     app.run()
+    
