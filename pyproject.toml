@@ -16,3 +16,4 @@ dependencies = [
     "pywin32>=311",
     "pywinhook>=1.6.2",
 ]
+
